@@ -6,6 +6,7 @@ from collections.abc import Iterable
 import pandas as pd
 
 from .models import ProductAnalysis, Supplier, TrendPoint
+from .schema import validate_trade_data
 
 
 def _growth(current: float, previous: float) -> float | None:
@@ -35,6 +36,30 @@ def _first_description(rows: pd.DataFrame, hs_code: str) -> str:
     return values.iloc[0] if not values.empty else f"HS {hs_code}"
 
 
+def _select_product_rows(frame: pd.DataFrame, hs_code: str) -> pd.DataFrame:
+    """Select one non-overlapping HS level for each year and trade partner."""
+    candidates = frame[frame["_hs"].str.startswith(hs_code, na=False)].copy()
+    if candidates.empty:
+        return candidates
+
+    candidates["_hs_length"] = candidates["_hs"].str.len()
+    description_key = candidates["partnerDesc"].fillna("").astype(str).str.strip().str.casefold()
+    candidates["_partner_key"] = candidates["_partner_code"].where(
+        candidates["_partner_code"].ne(""),
+        "name:" + description_key,
+    )
+
+    selected: list[pd.DataFrame] = []
+    for _, group in candidates.groupby(["_year", "_partner_key"], dropna=False, sort=False):
+        exact = group[group["_hs"] == hs_code]
+        if not exact.empty:
+            selected.append(exact)
+            continue
+        finest_length = int(group["_hs_length"].max())
+        selected.append(group[group["_hs_length"] == finest_length])
+    return pd.concat(selected, ignore_index=False) if selected else candidates.iloc[0:0]
+
+
 def analyze_imports(
     data: pd.DataFrame,
     hs_codes: Iterable[str],
@@ -42,28 +67,22 @@ def analyze_imports(
     top_n: int = 10,
 ) -> list[ProductAnalysis]:
     """Calculate trends, growth, suppliers, CR3/CR5, and HHI from Comtrade rows."""
-    if data is None or data.empty:
-        raise ValueError("Trade data is empty.")
-    required = {"period", "cmdCode", "partnerCode", "partnerDesc", "primaryValue"}
-    missing = required - set(data.columns)
-    if missing:
-        raise ValueError(f"Trade data is missing required columns: {sorted(missing)}")
     if top_n < 1:
         raise ValueError("top_n must be at least 1.")
 
     requested_years = tuple(sorted({int(year) for year in years}))
-    frame = data.copy()
-    frame["_year"] = pd.to_numeric(frame["period"], errors="coerce").astype("Int64")
-    frame["_hs"] = frame["cmdCode"].astype(str).str.replace(r"\.0$", "", regex=True)
-    frame["_partner_code"] = (
-        frame["partnerCode"].astype(str).str.replace(r"\.0$", "", regex=True)
-    )
-    frame["_value"] = pd.to_numeric(frame["primaryValue"], errors="coerce").fillna(0.0)
+    if not requested_years:
+        raise ValueError("At least one year is required.")
+    frame = validate_trade_data(data)
+    frame["_year"] = frame["period"].astype(int)
+    frame["_hs"] = frame["cmdCode"].astype(str)
+    frame["_partner_code"] = frame["partnerCode"].astype(str)
+    frame["_value"] = frame["primaryValue"].astype(float)
 
     results: list[ProductAnalysis] = []
     for raw_code in hs_codes:
         hs_code = str(raw_code)
-        rows = frame[frame["_hs"] == hs_code].copy()
+        rows = _select_product_rows(frame, hs_code)
         if rows.empty:
             continue
 
@@ -91,13 +110,11 @@ def analyze_imports(
         latest_value = values_by_year[latest_year]
 
         trend: list[TrendPoint] = []
-        previous: float | None = None
         for year in requested_years:
             value = values_by_year.get(year)
+            previous = values_by_year.get(year - 1)
             yoy = _growth(value, previous) if value is not None and previous is not None else None
             trend.append(TrendPoint(year=year, import_value_usd=value, yoy_growth=yoy))
-            if value is not None:
-                previous = value
 
         latest_yoy = next(point.yoy_growth for point in reversed(trend) if point.year == latest_year)
         total_growth = _growth(latest_value, first_value)
@@ -161,4 +178,3 @@ def analyze_imports(
     if not results:
         raise ValueError("None of the requested HS codes had usable data.")
     return results
-

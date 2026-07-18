@@ -24,3 +24,19 @@ def test_report_discloses_unspecified_partner_labels() -> None:
     analyses = analyze_imports(data, ["8504"], range(2020, 2025))
     report = render_report(Reporter("842", "USA", "USA"), analyses)
     assert "Other Asia, nes` are reproduced exactly" in report
+
+
+def test_report_marks_missing_year_growth_as_unavailable() -> None:
+    data = pd.DataFrame(
+        [
+            {"period": 2021, "cmdCode": "8504", "partnerCode": 0, "partnerDesc": "World", "primaryValue": 100},
+            {"period": 2021, "cmdCode": "8504", "partnerCode": 156, "partnerDesc": "China", "primaryValue": 100},
+            {"period": 2023, "cmdCode": "8504", "partnerCode": 0, "partnerDesc": "World", "primaryValue": 121},
+            {"period": 2023, "cmdCode": "8504", "partnerCode": 156, "partnerDesc": "China", "primaryValue": 121},
+        ]
+    )
+    report = render_report(
+        Reporter("842", "USA", "USA"),
+        analyze_imports(data, ["8504"], [2021, 2022, 2023]),
+    )
+    assert "| 2023 | US$121 | N/A |" in report

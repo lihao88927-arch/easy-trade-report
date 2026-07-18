@@ -75,6 +75,18 @@ def _default_output(country: str, end_year: int) -> Path:
 def _reporter_from_csv(data: pd.DataFrame, fallback: str) -> Reporter:
     if data.empty:
         raise ValueError("Input CSV is empty.")
+
+    for column in ("reporterCode", "reporterISO", "reporterDesc"):
+        if column not in data.columns:
+            continue
+        values = {
+            re.sub(r"\.0$", "", str(value)).strip().casefold()
+            for value in data[column].dropna()
+            if str(value).strip()
+        }
+        if len(values) > 1:
+            raise ValueError(f"Input CSV contains multiple reporters in {column}.")
+
     row = data.iloc[0]
     raw_code = row.get("reporterCode", "")
     raw_name = row.get("reporterDesc", "")

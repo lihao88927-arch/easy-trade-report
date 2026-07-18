@@ -1,15 +1,37 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from time import sleep as _retry_sleep
+from typing import Any
 
 import pandas as pd
+import requests
+import urllib3
+from tenacity import (
+    RetryError,
+    Retrying,
+    retry_if_exception_type,
+    retry_if_result,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from .models import Reporter
 
 
 class ComtradeError(RuntimeError):
     """Raised when the official UN Comtrade package cannot return usable data."""
+
+
+MAX_RECORDS = 100_000
+TRANSIENT_EXCEPTIONS = (
+    TimeoutError,
+    ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ConnectionError,
+    urllib3.exceptions.HTTPError,
+)
 
 
 COUNTRY_ALIASES = {
@@ -138,6 +160,79 @@ def resolve_reporter(country: str) -> Reporter:
     return resolve_reporter_from_dataframe(country, reference)
 
 
+def _missing_response(value: object) -> bool:
+    return value is None or (isinstance(value, pd.DataFrame) and value.empty)
+
+
+def _call_with_retry(operation: Callable[[], Any], context: str) -> Any:
+    retrying = Retrying(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential_jitter(initial=1, max=20),
+        retry=(
+            retry_if_exception_type(TRANSIENT_EXCEPTIONS)
+            | retry_if_result(_missing_response)
+        ),
+        sleep=_retry_sleep,
+        reraise=True,
+    )
+    try:
+        return retrying(operation)
+    except RetryError as exc:
+        raise ComtradeError(f"UN Comtrade returned no usable response after 3 attempts for {context}.") from exc
+    except TRANSIENT_EXCEPTIONS as exc:
+        raise ComtradeError(f"UN Comtrade request failed after 3 attempts for {context}: {exc}") from exc
+
+
+def _query_kwargs(reporter: Reporter, year: int, hs_code: str) -> dict[str, object]:
+    return {
+        "typeCode": "C",
+        "freqCode": "A",
+        "clCode": "HS",
+        "period": str(year),
+        "reporterCode": reporter.code,
+        "cmdCode": hs_code,
+        "flowCode": "M",
+        "partnerCode": None,
+        "partner2Code": None,
+        "customsCode": None,
+        "motCode": None,
+        "aggregateBy": None,
+        "breakdownMode": "classic",
+    }
+
+
+def _response_count(value: object, context: str) -> int:
+    frame = value if isinstance(value, pd.DataFrame) else pd.DataFrame(value)
+    if frame.empty or "count" not in frame.columns:
+        raise ComtradeError(f"UN Comtrade returned an invalid count response for {context}.")
+    try:
+        count = int(frame.iloc[0]["count"])
+    except (TypeError, ValueError) as exc:
+        raise ComtradeError(f"UN Comtrade returned a non-numeric record count for {context}.") from exc
+    if count < 0:
+        raise ComtradeError(f"UN Comtrade returned a negative record count for {context}.")
+    return count
+
+
+def _validate_chunk(data: pd.DataFrame, reporter: Reporter, year: int, hs_code: str) -> None:
+    context = f"{reporter.name}, HS {hs_code}, {year}"
+    required = {"period", "cmdCode", "partnerCode", "partnerDesc", "primaryValue"}
+    missing = required - set(data.columns)
+    if missing:
+        raise ComtradeError(f"UN Comtrade response is missing columns {sorted(missing)} for {context}.")
+
+    periods = pd.to_numeric(data["period"], errors="coerce").dropna().astype(int).unique()
+    if len(periods) != 1 or int(periods[0]) != year:
+        raise ComtradeError(f"UN Comtrade returned an unexpected period for {context}.")
+    products = data["cmdCode"].astype(str).str.replace(r"\.0$", "", regex=True)
+    if not products.str.startswith(hs_code).all():
+        raise ComtradeError(f"UN Comtrade returned an unexpected HS code for {context}.")
+    if "reporterCode" in data.columns:
+        reporters = data["reporterCode"].astype(str).str.replace(r"\.0$", "", regex=True)
+        if not reporters.eq(reporter.code).all():
+            raise ComtradeError(f"UN Comtrade returned an unexpected reporter for {context}.")
+
+
 def fetch_import_data(
     api_key: str,
     reporter: Reporter,
@@ -149,36 +244,48 @@ def fetch_import_data(
         raise ValueError("A UN Comtrade subscription key is required.")
 
     package = _official_package()
-    periods = ",".join(str(year) for year in years)
-    products = ",".join(hs_codes)
-    data = package.getFinalData(
-        api_key,
-        typeCode="C",
-        freqCode="A",
-        clCode="HS",
-        period=periods,
-        reporterCode=reporter.code,
-        cmdCode=products,
-        flowCode="M",
-        partnerCode=None,
-        partner2Code=None,
-        customsCode=None,
-        motCode=None,
-        maxRecords=100000,
-        format_output="JSON",
-        aggregateBy=None,
-        breakdownMode="classic",
-        countOnly=False,
-        includeDesc=True,
-    )
-    if data is None:
-        raise ComtradeError(
-            "UN Comtrade returned no response. Check the key, rate limits, and query parameters."
-        )
-    if not isinstance(data, pd.DataFrame):
-        data = pd.DataFrame(data)
-    if data.empty:
-        raise ComtradeError(
-            f"No import records were returned for {reporter.name}, HS {products}, {periods}."
-        )
-    return data
+    requested_years = tuple(sorted({int(year) for year in years}))
+    requested_products = tuple(dict.fromkeys(str(code) for code in hs_codes))
+    chunks: list[pd.DataFrame] = []
+
+    for year in requested_years:
+        for hs_code in requested_products:
+            context = f"{reporter.name}, HS {hs_code}, {year}"
+            kwargs = _query_kwargs(reporter, year, hs_code)
+            count_response = _call_with_retry(
+                lambda kwargs=kwargs: package.getCountFinalData(api_key, **kwargs),
+                f"record count: {context}",
+            )
+            count = _response_count(count_response, context)
+            if count == 0:
+                continue
+            if count > MAX_RECORDS:
+                raise ComtradeError(
+                    f"UN Comtrade reports {count:,} records for {context}, exceeding the {MAX_RECORDS:,} record limit."
+                )
+
+            data_kwargs = {
+                **kwargs,
+                "maxRecords": MAX_RECORDS,
+                "format_output": "JSON",
+                "countOnly": False,
+                "includeDesc": True,
+            }
+            response = _call_with_retry(
+                lambda data_kwargs=data_kwargs: package.getFinalData(api_key, **data_kwargs),
+                context,
+            )
+            chunk = response if isinstance(response, pd.DataFrame) else pd.DataFrame(response)
+            if len(chunk) != count:
+                raise ComtradeError(
+                    f"UN Comtrade returned {len(chunk):,} of {count:,} expected records "
+                    f"for {context}; refusing a truncated report."
+                )
+            _validate_chunk(chunk, reporter, year, hs_code)
+            chunks.append(chunk)
+
+    if not chunks:
+        products = ",".join(requested_products)
+        periods = ",".join(str(year) for year in requested_years)
+        raise ComtradeError(f"No import records were returned for {reporter.name}, HS {products}, {periods}.")
+    return pd.concat(chunks, ignore_index=True).drop_duplicates().reset_index(drop=True)

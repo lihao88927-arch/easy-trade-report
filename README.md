@@ -41,6 +41,12 @@ python -m pip install -e .
 python -m pip install -e ".[dev]"
 ```
 
+如需在可复用 AI 工作流中规范化 XLSX 文件，安装可选 Excel 依赖：
+
+```powershell
+python -m pip install -e ".[excel]"
+```
+
 ### 配置密钥
 
 在 [UN Comtrade Developer Portal](https://comtradedeveloper.un.org/) 创建订阅，然后只在环境变量中设置密钥：
@@ -99,6 +105,8 @@ easy-trade-report --country DEU --end-year 2024 `
 - 趋势总额优先使用 `partnerCode=0` 的 World 汇总行；若缺失，则回退为双边供应国合计。
 - 供应国排名排除 World 行，避免重复计算。
 - CAGR 使用首个和最后一个可用年度之间的实际年数。
+- 同比增速只在紧邻上一日历年有数据时计算；缺年显示 `N/A`。
+- 若没有请求层级的 HS 汇总行，自动汇总其后代编码；同一年度和供应国只选择一个最细层级，避免父子编码重复计算。
 - HHI = 各供应国份额平方和 × 10,000。
 - 集中度阈值：HHI < 1,500 为低；1,500–2,500 为中度；> 2,500 为高。
 - CR3/CR5 分别为前三/前五供应国份额之和。
@@ -157,6 +165,12 @@ For development:
 python -m pip install -e ".[dev]"
 ```
 
+For XLSX normalization in the reusable AI workflow:
+
+```powershell
+python -m pip install -e ".[excel]"
+```
+
 ### Configure
 
 Create a subscription in the [UN Comtrade Developer Portal](https://comtradedeveloper.un.org/) and expose the key only as an environment variable:
@@ -196,6 +210,8 @@ Use `--input-csv` to rebuild a report from a previously saved official-client re
 - Trend totals prefer the reported World aggregate and fall back to summed bilateral suppliers.
 - Supplier rankings exclude the World row.
 - CAGR uses the actual interval between the first and last available years.
+- YoY growth is calculated only when the immediately preceding calendar year is present.
+- Exact requested-level HS rows take precedence; otherwise one finest descendant level per year and partner is used to avoid parent-child double counting.
 - HHI is the sum of squared supplier shares multiplied by 10,000.
 - Concentration thresholds: below 1,500 low; 1,500–2,500 moderate; above 2,500 high.
 - CR3 and CR5 are the combined shares of the top three and top five suppliers.

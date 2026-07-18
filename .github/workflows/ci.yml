@@ -8,6 +8,35 @@ permissions:
   contents: read
 
 jobs:
+  workflow-security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint 1.7.12
+        shell: bash
+        run: |
+          archive=actionlint_1.7.12_linux_amd64.tar.gz
+          curl --fail --location --silent --show-error \
+            --output "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/$archive"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $archive" | sha256sum --check
+          tar -xzf "$archive" actionlint
+          sudo install actionlint /usr/local/bin/actionlint
+
+      - name: Lint GitHub Actions workflows
+        run: actionlint
+
+      - name: Audit GitHub Actions workflows
+        uses: zizmorcore/zizmor-action@6599ee8b7a49aef6a770f63d261d214911a7ce02 # v0.6.0
+        with:
+          advanced-security: false
+          annotations: true
+          version: 1.27.0
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -16,16 +45,23 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
-        run: python -m pip install -e ".[dev]"
+        run: |
+          python -m pip install --upgrade "pip>=26.1.2"
+          python -m pip install -e ".[dev]"
       - name: Lint
         run: python -m ruff check .
       - name: Test
         run: python -m pytest
       - name: Build wheel
         run: python -m build --wheel
+      - name: Audit Python dependencies
+        if: matrix.python-version == '3.12'
+        run: python -m pip_audit --skip-editable

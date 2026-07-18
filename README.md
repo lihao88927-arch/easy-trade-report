@@ -227,6 +227,10 @@ python -m ruff check .
 
 Example: [USA electrical equipment import report](reports/sample-usa-electrical-equipment-2020-2024.md).
 
+### Reusable AI workflow
+
+The repository also includes a portable Codex Skill at [`skills/generate-trade-market-report`](skills/generate-trade-market-report). Install or link that folder into your Codex skills directory to reuse the same verified CSV/XLSX-to-report workflow when you send trade data to AI.
+
 ## License
 
 MIT. UN Comtrade data remain subject to the source's terms and citation requirements.

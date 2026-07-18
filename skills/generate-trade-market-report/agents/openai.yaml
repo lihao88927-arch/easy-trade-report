@@ -1,0 +1,4 @@
+interface:
+  display_name: "贸易市场报告工作流"
+  short_description: "上传数据或输入国家与HS编码，一键生成贸易市场报告"
+  default_prompt: "Use $generate-trade-market-report to analyze my attached trade data and generate a verified bilingual market report."

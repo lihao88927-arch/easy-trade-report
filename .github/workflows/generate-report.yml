@@ -46,10 +46,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -102,10 +102,9 @@ jobs:
         run: cat generated/trade-market-report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report files
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trade-market-report-${{ github.run_number }}
           path: generated/
           if-no-files-found: error
           retention-days: 30
-

@@ -1,0 +1,18 @@
+period,reporterCode,reporterISO,reporterDesc,flowCode,flowDesc,partnerCode,partnerISO,partnerDesc,cmdCode,cmdDesc,primaryValue
+2020,842,USA,USA,M,Import,0,W00,World,8504,Electric transformers and static converters,100
+2020,842,USA,USA,M,Import,156,CHN,China,8504,Electric transformers and static converters,60
+2020,842,USA,USA,M,Import,484,MEX,Mexico,8504,Electric transformers and static converters,40
+2021,842,USA,USA,M,Import,0,W00,World,8504,Electric transformers and static converters,110
+2021,842,USA,USA,M,Import,156,CHN,China,8504,Electric transformers and static converters,66
+2021,842,USA,USA,M,Import,484,MEX,Mexico,8504,Electric transformers and static converters,44
+2022,842,USA,USA,M,Import,0,W00,World,8504,Electric transformers and static converters,121
+2022,842,USA,USA,M,Import,156,CHN,China,8504,Electric transformers and static converters,72.6
+2022,842,USA,USA,M,Import,484,MEX,Mexico,8504,Electric transformers and static converters,48.4
+2023,842,USA,USA,M,Import,0,W00,World,8504,Electric transformers and static converters,133.1
+2023,842,USA,USA,M,Import,156,CHN,China,8504,Electric transformers and static converters,79.86
+2023,842,USA,USA,M,Import,484,MEX,Mexico,8504,Electric transformers and static converters,53.24
+2024,842,USA,USA,M,Import,0,W00,World,8504,Electric transformers and static converters,146.41
+2024,842,USA,USA,M,Import,156,CHN,China,8504,Electric transformers and static converters,73.205
+2024,842,USA,USA,M,Import,484,MEX,Mexico,8504,Electric transformers and static converters,43.923
+2024,842,USA,USA,M,Import,276,DEU,Germany,8504,Electric transformers and static converters,29.282
+

@@ -1,0 +1,111 @@
+name: Generate Trade Market Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      country:
+        description: "Country name, ISO3, or UN reporter code"
+        required: true
+        default: "USA"
+        type: string
+      hs_codes:
+        description: "Space-separated HS codes"
+        required: true
+        default: "8504 8535 8536 8537"
+        type: string
+      end_year:
+        description: "Last year in the report"
+        required: true
+        default: "2024"
+        type: string
+      years:
+        description: "Number of annual periods"
+        required: true
+        default: "5"
+        type: string
+      top_suppliers:
+        description: "Number of suppliers shown per HS code"
+        required: true
+        default: "10"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      COMTRADE_API_KEY: ${{ secrets.COMTRADE_API_KEY }}
+      REPORT_COUNTRY: ${{ inputs.country }}
+      REPORT_HS_CODES: ${{ inputs.hs_codes }}
+      REPORT_END_YEAR: ${{ inputs.end_year }}
+      REPORT_YEARS: ${{ inputs.years }}
+      REPORT_TOP_SUPPLIERS: ${{ inputs.top_suppliers }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install report engine
+        run: python -m pip install .
+
+      - name: Validate configuration
+        shell: bash
+        run: |
+          if [[ -z "$COMTRADE_API_KEY" ]]; then
+            echo "::error::Repository secret COMTRADE_API_KEY is missing. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          if [[ ! "$REPORT_END_YEAR" =~ ^[0-9]{4}$ ]]; then
+            echo "::error::end_year must be a four-digit year."
+            exit 1
+          fi
+          if [[ ! "$REPORT_YEARS" =~ ^[0-9]+$ ]] || (( REPORT_YEARS < 2 )); then
+            echo "::error::years must be an integer of at least 2."
+            exit 1
+          fi
+          if [[ ! "$REPORT_TOP_SUPPLIERS" =~ ^[0-9]+$ ]] || (( REPORT_TOP_SUPPLIERS < 1 )); then
+            echo "::error::top_suppliers must be a positive integer."
+            exit 1
+          fi
+          for code in $REPORT_HS_CODES; do
+            if [[ ! "$code" =~ ^([0-9]{2}|[0-9]{4}|[0-9]{6})$ ]]; then
+              echo "::error::Invalid HS code: $code"
+              exit 1
+            fi
+          done
+
+      - name: Generate bilingual report
+        shell: bash
+        run: |
+          read -ra HS_CODES <<< "$REPORT_HS_CODES"
+          mkdir -p generated
+          python -m easy_trade_report.cli \
+            --country "$REPORT_COUNTRY" \
+            --hs "${HS_CODES[@]}" \
+            --end-year "$REPORT_END_YEAR" \
+            --years "$REPORT_YEARS" \
+            --top "$REPORT_TOP_SUPPLIERS" \
+            --output generated/trade-market-report.md \
+            --raw-csv generated/un-comtrade-raw.csv
+
+      - name: Show report in run summary
+        shell: bash
+        run: cat generated/trade-market-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report files
+        uses: actions/upload-artifact@v4
+        with:
+          name: trade-market-report-${{ github.run_number }}
+          path: generated/
+          if-no-files-found: error
+          retention-days: 30
+
